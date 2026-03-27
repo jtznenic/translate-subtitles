@@ -46,11 +46,15 @@ uv sync
 uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
 ```
 
-运行前请先设置环境变量：
+运行前请先配置API密钥（二选一）：
 
+**方式一：环境变量（推荐）**
 ```bash
 export SUBTITLE_API_KEY="your-api-key"
 ```
+
+**方式二：配置文件**
+在 `config.json` 的 `api.api_key` 字段中填入密钥（不推荐，存在安全风险）
 
 ## 配置文件说明
 
@@ -63,12 +67,12 @@ export SUBTITLE_API_KEY="your-api-key"
     "api_url": "https://api.sensenova.cn/compatible-mode/v2/chat/completions",
     "model_id": "SenseChat-Turbo-1202",
     "temperature": 0.3,
-    "max_tokens": 4096
+    "max_tokens": 8192
   },
   "translation": {
-    "mode": "bilingual",
-    "chunk_size": 20,
-    "max_workers": 10,
+    "mode": "translation_only",
+    "chunk_size": 15,
+    "max_workers": 5,
     "rpm_limit": 60,
     "target_language": "中文"
   },
@@ -88,15 +92,15 @@ export SUBTITLE_API_KEY="your-api-key"
 | `api_url` | API接口地址 | 必填 |
 | `model_id` | 使用的模型名称 | 必填 |
 | `temperature` | 温度参数，控制输出的随机性（0-1） | 0.3 |
-| `max_tokens` | 单次请求的最大token数 | 4096 |
+| `max_tokens` | 单次请求的最大token数 | 8192 |
 
 #### 翻译配置 (translation)
 
 | 参数 | 说明 | 可选值 | 默认值 |
 |------|------|--------|--------|
-| `mode` | 翻译模式 | `bilingual` / `translation_only` | `bilingual` |
-| `chunk_size` | 每次翻译的字幕条目数量 | 正整数 | 20 |
-| `max_workers` | 并发线程数 | 正整数 | 10 |
+| `mode` | 翻译模式 | `bilingual` / `translation_only` | `translation_only` |
+| `chunk_size` | 每次翻译的字幕条目数量 | 正整数 | 15 |
+| `max_workers` | 并发线程数 | 正整数 | 5 |
 | `rpm_limit` | 每分钟请求数限制（Requests Per Minute） | 正整数 | 60 |
 | `target_language` | 目标语言 | 任意语言名称 | 中文 |
 
@@ -202,10 +206,52 @@ uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
 └── README.md               # 本文档
 ```
 
+## API密钥配置
+
+本项目支持两种API密钥配置方式：
+
+### 方式一：环境变量（推荐）
+
+在运行前设置环境变量：
+
+**Linux/macOS:**
+```bash
+export SUBTITLE_API_KEY="your-api-key"
+uv run python translate_subtitles.py input.srt
+```
+
+**Windows PowerShell:**
+```powershell
+$env:SUBTITLE_API_KEY="your-api-key"
+uv run python translate_subtitles.py input.srt
+```
+
+**永久配置（Linux/macOS）：**
+```bash
+# 添加到 ~/.bashrc 或 ~/.zshrc
+echo 'export SUBTITLE_API_KEY="your-api-key"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 方式二：配置文件
+
+在 `config.json` 的 `api.api_key` 字段中直接填入密钥：
+
+```json
+{
+  "api": {
+    "api_key": "your-api-key",
+    ...
+  }
+}
+```
+
+> ⚠️ **安全提示**：配置文件方式存在安全风险，config.json可能被意外提交到版本控制。建议优先使用环境变量方式，并将 `.env` 文件或包含密钥的文件加入 `.gitignore`。
+
 ## 注意事项
 
 1. 确保 `config.json` 文件存在且配置正确
-2. 请优先通过环境变量 `SUBTITLE_API_KEY` 提供有效的 API 密钥
+2. 建议优先通过环境变量 `SUBTITLE_API_KEY` 提供有效的 API 密钥
 3. 翻译结果依赖于AI模型的质量，建议人工复核重要内容
 4. 词汇表可以提高专有名词的翻译一致性，建议为作品准备专门的词汇表
 
