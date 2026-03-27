@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Japanese subtitle translation tool based on AI."""
+"""AI-based subtitle translation tool supporting multiple languages."""
 
 import json
+import os
 import re
 import sys
 import time
@@ -80,6 +81,16 @@ def format_glossary(glossary: dict) -> str:
     return "\n".join(lines)
 
 
+def get_api_key(api_config: dict) -> str:
+    """Get API key from environment or config."""
+    api_key = os.environ.get("SUBTITLE_API_KEY") or api_config.get("api_key", "")
+    if not api_key:
+        raise ValueError(
+            "API key not found. Set SUBTITLE_API_KEY or provide api.api_key in config.json."
+        )
+    return api_key
+
+
 class RateLimiter:
     """Rate limiter for API requests."""
 
@@ -106,7 +117,6 @@ def translate_chunk(
     prompts_config = config["prompts"]
 
     mode = translation_config["mode"]
-    source_language = translation_config.get("source_language", "日语")
     target_language = translation_config.get("target_language", "中文")
 
     content_lines = []
@@ -120,26 +130,25 @@ def translate_chunk(
         prompt = prompts_config["bilingual_prompt"].format(
             glossary=glossary_str,
             content=content,
-            source_language=source_language,
             target_language=target_language,
         )
     else:
         prompt = prompts_config["translation_prompt"].format(
             glossary=glossary_str,
             content=content,
-            source_language=source_language,
             target_language=target_language,
         )
 
     system_prompt = prompts_config["system_prompt"].format(
-        source_language=source_language, target_language=target_language
+        target_language=target_language
     )
 
     rate_limiter.wait()
+    api_key = get_api_key(api_config)
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_config['api_key']}",
+        "Authorization": f"Bearer {api_key}",
     }
 
     payload = {
@@ -250,11 +259,26 @@ def translate_subtitles(
     return translated
 
 
-def generate_output_filename(input_path: Path) -> Path:
-    """Generate output filename based on input filename."""
+LANGUAGE_CODES = {
+    "中文": "cn",
+    "英语": "en",
+    "日语": "jp",
+    "英文": "en",
+    "日文": "jp",
+    "Chinese": "cn",
+    "English": "en",
+    "Japanese": "jp",
+}
+
+
+def generate_output_filename(input_path: Path, target_language: str) -> Path:
+    """Generate output filename based on input filename and target language."""
     stem = input_path.stem
     suffix = input_path.suffix
-    new_stem = stem + "_translated"
+
+    # Get language code, default to the language name itself if not in mapping
+    lang_code = LANGUAGE_CODES.get(target_language, target_language.lower())
+    new_stem = f"{stem}_{lang_code}"
 
     return input_path.parent / f"{new_stem}{suffix}"
 
@@ -271,11 +295,6 @@ def main():
         print(f"Error: Input file '{input_file}' not found")
         sys.exit(1)
 
-    if len(sys.argv) >= 3:
-        output_file = Path(sys.argv[2])
-    else:
-        output_file = generate_output_filename(input_file)
-
     script_dir = Path(__file__).parent
     config_path = script_dir / "config.json"
     glossary_path = script_dir / "glossary.json"
@@ -286,6 +305,13 @@ def main():
 
     print(f"Loading config from {config_path}")
     config = load_config(config_path)
+
+    target_language = config["translation"]["target_language"]
+
+    if len(sys.argv) >= 3:
+        output_file = Path(sys.argv[2])
+    else:
+        output_file = generate_output_filename(input_file, target_language)
 
     print(f"Loading glossary from {glossary_path}")
     glossary = load_glossary(glossary_path)
