@@ -2,14 +2,14 @@
   "api": {
     "api_key": "",
     "api_url": "https://api.sensenova.cn/compatible-mode/v2/chat/completions",
-    "model_id": "SenseChat-Turbo-1202",
+    "model_id": "SenseChat-5-1202",
     "temperature": 0.3,
-    "max_tokens": 8192
+    "max_tokens": 4096
   },
   "translation": {
-    "mode": "translation_only",
-    "chunk_size": 15,
-    "max_workers": 5,
+    "mode": "bilingual",
+    "chunk_size": 20,
+    "max_workers": 8,
     "target_language": "中文",
     "rpm_limit": 60
   },

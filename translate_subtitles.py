@@ -1,348 +1,429 @@
-#!/usr/bin/env python3
-"""AI-based subtitle translation tool supporting multiple languages."""
+from __future__ import annotations
 
+import argparse
 import json
+import math
 import os
 import re
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-
-import httpx
+from typing import Any
 
 
-@dataclass
-class Subtitle:
-    """Subtitle entry."""
-
-    id: int
-    start_time: str
-    end_time: str
-    text: str
+CONFIG_PATH = Path("config.json")
+GLOSSARY_PATH = Path("glossary.json")
+REQUEST_TIMEOUT_SECONDS = 120
+MAX_RETRIES = 3
 
 
-def parse_srt(content: str) -> list[Subtitle]:
-    """Parse SRT format subtitle file."""
-    pattern = r"(\d+)\n([\d:,]+) --> ([\d:,]+)\n(.*?)(?=\n\n|\Z)"
-    matches = re.findall(pattern, content, re.DOTALL)
+@dataclass(frozen=True)
+class SubtitleEntry:
+    index: int
+    timing: str
+    text_lines: list[str]
 
-    subtitles = []
-    for match in matches:
-        subtitle = Subtitle(
-            id=int(match[0]),
-            start_time=match[1],
-            end_time=match[2],
-            text=match[3].strip(),
-        )
-        subtitles.append(subtitle)
-
-    return subtitles
-
-
-def format_srt(subtitles: list[Subtitle], mode: str = "chinese_only") -> str:
-    """Format subtitles to SRT format."""
-    lines = []
-    for sub in subtitles:
-        lines.append(str(sub.id))
-        lines.append(f"{sub.start_time} --> {sub.end_time}")
-        if mode == "bilingual" and "\n" in sub.text:
-            parts = sub.text.split("\n", 1)
-            lines.append(parts[0])
-            lines.append(f"<i>{parts[1]}</i>")
-        else:
-            lines.append(sub.text)
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def load_config(config_path: Path) -> dict:
-    """Load configuration from JSON file."""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_glossary(glossary_path: Path) -> dict:
-    """Load glossary from JSON file."""
-    if not glossary_path.exists():
-        return {}
-    with open(glossary_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def format_glossary(glossary: dict) -> str:
-    """Format glossary to string."""
-    if not glossary:
-        return "无"
-    lines = [f"{k}: {v}" for k, v in glossary.items()]
-    return "\n".join(lines)
-
-
-def get_api_key(api_config: dict) -> str:
-    """Get API key from environment or config."""
-    api_key = os.environ.get("SUBTITLE_API_KEY") or api_config.get("api_key", "")
-    if not api_key:
-        raise ValueError(
-            "API key not found. Set SUBTITLE_API_KEY or provide api.api_key in config.json."
-        )
-    return api_key
+    @property
+    def text(self) -> str:
+        return "\n".join(self.text_lines).strip()
 
 
 class RateLimiter:
-    """Rate limiter for API requests."""
+    def __init__(self, rpm_limit: int) -> None:
+        self.rpm_limit = max(1, rpm_limit)
+        self._timestamps: deque[float] = deque()
+        self._condition = threading.Condition()
 
-    def __init__(self, rpm_limit: int):
-        self.rpm_limit = rpm_limit
-        self.interval = 60.0 / rpm_limit
-        self.last_request_time = 0.0
+    def acquire(self) -> None:
+        with self._condition:
+            while True:
+                now = time.monotonic()
+                window_start = now - 60
+                while self._timestamps and self._timestamps[0] <= window_start:
+                    self._timestamps.popleft()
 
-    def wait(self):
-        """Wait for rate limit."""
-        current_time = time.time()
-        elapsed = current_time - self.last_request_time
-        if elapsed < self.interval:
-            time.sleep(self.interval - elapsed)
-        self.last_request_time = time.time()
+                if len(self._timestamps) < self.rpm_limit:
+                    self._timestamps.append(now)
+                    self._condition.notify_all()
+                    return
+
+                wait_seconds = max(0.05, 60 - (now - self._timestamps[0]))
+                self._condition.wait(timeout=wait_seconds)
 
 
-def translate_chunk(
-    subtitles: list[Subtitle], config: dict, glossary: dict, rate_limiter: RateLimiter
-) -> list[Subtitle]:
-    """Translate a chunk of subtitles using AI API."""
-    api_config = config["api"]
-    translation_config = config["translation"]
-    prompts_config = config["prompts"]
+def load_json_file(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError as exc:
+        raise SystemExit(f"缺少配置文件: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"JSON 文件格式错误: {path} ({exc})") from exc
 
-    mode = translation_config["mode"]
-    target_language = translation_config.get("target_language", "中文")
 
-    content_lines = []
-    for sub in subtitles:
-        content_lines.append(f"[{sub.id}] {sub.text}")
-    content = "\n".join(content_lines)
+def resolve_api_key(config: dict[str, Any]) -> str:
+    api_key = os.getenv("SUBTITLE_API_KEY") or config["api"].get("api_key", "")
+    if not api_key:
+        raise SystemExit("未配置 API 密钥。请设置 SUBTITLE_API_KEY 环境变量或在 config.json 中填写 api.api_key。")
+    return api_key
 
-    glossary_str = format_glossary(glossary)
 
-    if mode == "bilingual":
-        prompt = prompts_config["bilingual_prompt"].format(
-            glossary=glossary_str,
-            content=content,
-            target_language=target_language,
-        )
-    else:
-        prompt = prompts_config["translation_prompt"].format(
-            glossary=glossary_str,
-            content=content,
-            target_language=target_language,
-        )
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="多线程字幕翻译工具")
+    parser.add_argument("input_file", help="输入的 SRT 字幕文件路径")
+    parser.add_argument("output_file", nargs="?", help="输出的 SRT 文件路径，可选")
+    return parser.parse_args()
 
-    system_prompt = prompts_config["system_prompt"].format(
-        target_language=target_language
+
+def parse_srt(content: str) -> list[SubtitleEntry]:
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    blocks = re.split(r"\n\s*\n", normalized.strip())
+    entries: list[SubtitleEntry] = []
+
+    for block in blocks:
+        lines = [line.rstrip() for line in block.split("\n")]
+        if len(lines) < 3:
+            continue
+
+        try:
+            index = int(lines[0].strip())
+        except ValueError:
+            continue
+
+        timing = lines[1].strip()
+        text_lines = [line for line in lines[2:] if line != ""]
+        entries.append(SubtitleEntry(index=index, timing=timing, text_lines=text_lines))
+
+    if not entries:
+        raise SystemExit("未从输入文件中解析出有效的 SRT 字幕条目。")
+
+    return entries
+
+
+def chunk_entries(entries: list[SubtitleEntry], chunk_size: int) -> list[list[SubtitleEntry]]:
+    if chunk_size <= 0:
+        raise SystemExit("translation.chunk_size 必须是正整数。")
+    return [entries[i : i + chunk_size] for i in range(0, len(entries), chunk_size)]
+
+
+def format_glossary(glossary: dict[str, str]) -> str:
+    if not glossary:
+        return "无"
+    return "\n".join(f"- {source}: {target}" for source, target in glossary.items())
+
+
+def build_prompt(
+    entries: list[SubtitleEntry],
+    config: dict[str, Any],
+    glossary_text: str,
+) -> str:
+    translation_cfg = config["translation"]
+    prompts_cfg = config["prompts"]
+    mode = translation_cfg["mode"]
+    prompt_template = prompts_cfg["bilingual_prompt"] if mode == "bilingual" else prompts_cfg["translation_prompt"]
+    content = "\n\n".join(f"id: {entry.index}\ntext:\n{entry.text}" for entry in entries)
+    return prompt_template.format(
+        target_language=translation_cfg["target_language"],
+        glossary=glossary_text,
+        content=content,
     )
 
-    rate_limiter.wait()
-    api_key = get_api_key(api_config)
 
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
+def extract_message_content(response_payload: dict[str, Any]) -> str:
+    try:
+        content = response_payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"API 响应缺少 message content: {response_payload}") from exc
 
-    payload = {
-        "model": api_config["model_id"],
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": api_config.get("temperature", 0.3),
-        "max_tokens": api_config.get("max_tokens", 4096),
-    }
+    if isinstance(content, str):
+        return content
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            with httpx.Client(timeout=120.0) as client:
-                response = client.post(
-                    api_config["api_url"], headers=headers, json=payload
-                )
-                response.raise_for_status()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+        merged = "".join(parts).strip()
+        if merged:
+            return merged
 
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-
-                json_match = re.search(r"\[.*\]", content, re.DOTALL)
-                if json_match:
-                    translations = json.loads(json_match.group())
-                else:
-                    translations = json.loads(content)
-
-                translated_subs = []
-                for trans in translations:
-                    sub_id = trans["id"]
-                    original_sub = next((s for s in subtitles if s.id == sub_id), None)
-                    if original_sub:
-                        if mode == "bilingual":
-                            text = f"{original_sub.text}\n{trans['translated']}"
-                        else:
-                            text = trans["translated"]
-
-                        translated_subs.append(
-                            Subtitle(
-                                id=sub_id,
-                                start_time=original_sub.start_time,
-                                end_time=original_sub.end_time,
-                                text=text,
-                            )
-                        )
-
-                return translated_subs
-
-        except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
-            if attempt < max_retries - 1:
-                print(f"Translation attempt {attempt + 1} failed: {e}. Retrying...")
-                time.sleep(2**attempt)
-            else:
-                print(f"Translation failed after {max_retries} attempts: {e}")
-                raise
+    raise ValueError(f"无法解析 API 返回内容: {content!r}")
 
 
-def split_into_chunks(
-    subtitles: list[Subtitle], chunk_size: int
-) -> list[list[Subtitle]]:
-    """Split subtitles into chunks."""
-    chunks = []
-    for i in range(0, len(subtitles), chunk_size):
-        chunks.append(subtitles[i : i + chunk_size])
-    return chunks
+def strip_code_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, count=1)
+        cleaned = re.sub(r"\s*```$", "", cleaned, count=1)
+    return cleaned.strip()
 
 
-def translate_subtitles(
-    subtitles: list[Subtitle], config: dict, glossary: dict
-) -> list[Subtitle]:
-    """Translate all subtitles with parallel processing."""
-    translation_config = config["translation"]
-    chunk_size = translation_config["chunk_size"]
-    max_workers = translation_config["max_workers"]
-    rpm_limit = translation_config.get("rpm_limit", 60)
+def extract_json_array(text: str) -> list[dict[str, Any]]:
+    cleaned = strip_code_fences(text)
 
-    chunks = split_into_chunks(subtitles, chunk_size)
-    rate_limiter = RateLimiter(rpm_limit)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\[\s*{.*}\s*]", cleaned, flags=re.DOTALL)
+        if not match:
+            raise ValueError(f"模型输出不是合法 JSON 数组: {cleaned[:300]}")
+        payload = json.loads(match.group(0))
 
-    translated = []
+    if not isinstance(payload, list):
+        raise ValueError(f"模型输出 JSON 不是数组: {payload!r}")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(translate_chunk, chunk, config, glossary, rate_limiter): i
-            for i, chunk in enumerate(chunks)
+    result: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"模型输出数组元素不是对象: {item!r}")
+        result.append(item)
+    return result
+
+
+class PartialTranslationError(ValueError):
+    def __init__(
+        self,
+        translated_by_id: dict[int, str],
+        missing_ids: list[int],
+    ) -> None:
+        super().__init__(f"返回结果缺少字幕 id: {missing_ids}")
+        self.translated_by_id = translated_by_id
+        self.missing_ids = missing_ids
+
+
+def request_translation(
+    entries: list[SubtitleEntry],
+    config: dict[str, Any],
+    glossary_text: str,
+    api_key: str,
+    rate_limiter: RateLimiter,
+) -> dict[int, str]:
+    api_cfg = config["api"]
+    translation_cfg = config["translation"]
+    remaining_entries = list(entries)
+    translated_by_id: dict[int, str] = {}
+    last_error: Exception | None = None
+    attempt = 0
+
+    while remaining_entries and attempt < MAX_RETRIES:
+        prompt = build_prompt(remaining_entries, config, glossary_text)
+        payload = {
+            "model": api_cfg["model_id"],
+            "temperature": api_cfg.get("temperature", 0.3),
+            "max_tokens": api_cfg.get("max_tokens", 8192),
+            "messages": [
+                {
+                    "role": "system",
+                    "content": config["prompts"]["system_prompt"].format(
+                        target_language=translation_cfg["target_language"]
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
         }
 
-        results = [None] * len(chunks)
+        request_data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            api_cfg["api_url"],
+            data=request_data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
 
-        for future in as_completed(futures):
-            chunk_index = futures[future]
-            try:
-                result = future.result()
-                results[chunk_index] = result
-                print(f"Translated chunk {chunk_index + 1}/{len(chunks)}")
-            except Exception as e:
-                print(f"Error translating chunk {chunk_index + 1}: {e}")
-                raise
+        try:
+            rate_limiter.acquire()
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                raw_response = response.read().decode("utf-8")
+            response_payload = json.loads(raw_response)
+            message_content = extract_message_content(response_payload)
+            items = extract_json_array(message_content)
+            translated = validate_translation_items(remaining_entries, items)
+            translated_by_id.update(translated)
+            remaining_entries = []
+            return translated_by_id
+        except PartialTranslationError as exc:
+            last_error = exc
+            new_ids = set(exc.translated_by_id).difference(translated_by_id)
+            translated_by_id.update(exc.translated_by_id)
+            remaining_entries = [entry for entry in remaining_entries if entry.index in exc.missing_ids]
+            if remaining_entries:
+                print(
+                    f"分块 {entries[0].index}-{entries[-1].index} 缺少字幕 {exc.missing_ids}，正在补译。"
+                )
+            if new_ids:
+                attempt = 0
+            else:
+                attempt += 1
+            if attempt < MAX_RETRIES and remaining_entries:
+                time.sleep(min(2 ** max(attempt, 1), 8))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            last_error = exc
+            attempt += 1
+            if attempt < MAX_RETRIES:
+                time.sleep(min(2**attempt, 8))
 
-        for result in results:
-            if result:
-                translated.extend(result)
-
-    translated.sort(key=lambda s: s.id)
-    return translated
-
-
-LANGUAGE_CODES = {
-    "中文": "cn",
-    "英语": "en",
-    "日语": "jp",
-    "英文": "en",
-    "日文": "jp",
-    "Chinese": "cn",
-    "English": "en",
-    "Japanese": "jp",
-}
-
-
-def generate_output_filename(input_path: Path, target_language: str) -> Path:
-    """Generate output filename based on input filename and target language."""
-    stem = input_path.stem
-    suffix = input_path.suffix
-
-    # Get language code, default to the language name itself if not in mapping
-    lang_code = LANGUAGE_CODES.get(target_language, target_language.lower())
-    new_stem = f"{stem}_{lang_code}"
-
-    return input_path.parent / f"{new_stem}{suffix}"
+    failed_ids = [entry.index for entry in remaining_entries] if remaining_entries else [entry.index for entry in entries]
+    raise RuntimeError(f"字幕分块翻译失败: {failed_ids} ({last_error})")
 
 
-def main():
-    """Main entry point."""
-    if len(sys.argv) < 2:
-        print("Usage: uv run python translate_subtitles.py <input_file> [output_file]")
-        sys.exit(1)
+def validate_translation_items(entries: list[SubtitleEntry], items: list[dict[str, Any]]) -> dict[int, str]:
+    expected_ids = {entry.index for entry in entries}
+    translated_by_id: dict[int, str] = {}
 
-    input_file = Path(sys.argv[1])
+    for item in items:
+        raw_id = item.get("id")
+        translated = item.get("translated")
+        try:
+            subtitle_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"返回结果中的 id 非法: {item!r}") from exc
 
-    if not input_file.exists():
-        print(f"Error: Input file '{input_file}' not found")
-        sys.exit(1)
+        if subtitle_id not in expected_ids:
+            raise ValueError(f"返回结果中包含未知字幕 id: {subtitle_id}")
+        if not isinstance(translated, str) or not translated.strip():
+            raise ValueError(f"返回结果中的 translated 非法: {item!r}")
+        translated_by_id[subtitle_id] = translated.strip()
 
-    script_dir = Path(__file__).parent
-    config_path = script_dir / "config.json"
-    glossary_path = script_dir / "glossary.json"
+    missing_ids = expected_ids.difference(translated_by_id)
+    if missing_ids:
+        raise PartialTranslationError(
+            translated_by_id=translated_by_id,
+            missing_ids=sorted(missing_ids),
+        )
 
-    if not config_path.exists():
-        print(f"Error: Config file '{config_path}' not found")
-        sys.exit(1)
+    return translated_by_id
 
-    print(f"Loading config from {config_path}")
-    config = load_config(config_path)
 
-    target_language = config["translation"]["target_language"]
+def translate_entries(
+    entries: list[SubtitleEntry],
+    config: dict[str, Any],
+    glossary: dict[str, str],
+    api_key: str,
+) -> dict[int, str]:
+    translation_cfg = config["translation"]
+    chunks = chunk_entries(entries, int(translation_cfg["chunk_size"]))
+    glossary_text = format_glossary(glossary)
+    rate_limiter = RateLimiter(int(translation_cfg.get("rpm_limit", 60)))
+    translations: dict[int, str] = {}
 
-    if len(sys.argv) >= 3:
-        output_file = Path(sys.argv[2])
-    else:
-        output_file = generate_output_filename(input_file, target_language)
+    max_workers = max(1, int(translation_cfg.get("max_workers", 5)))
+    print(f"开始翻译，共 {len(entries)} 条字幕，分为 {len(chunks)} 个分块，线程数 {max_workers}。")
 
-    print(f"Loading glossary from {glossary_path}")
-    glossary = load_glossary(glossary_path)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(request_translation, chunk, config, glossary_text, api_key, rate_limiter): chunk
+            for chunk in chunks
+        }
 
-    print(f"Reading subtitles from {input_file}")
-    with open(input_file, "r", encoding="utf-8") as f:
-        content = f.read()
+        completed = 0
+        for future in as_completed(future_map):
+            chunk = future_map[future]
+            chunk_result = future.result()
+            translations.update(chunk_result)
+            completed += 1
+            chunk_start = chunk[0].index
+            chunk_end = chunk[-1].index
+            print(f"已完成分块 {completed}/{len(chunks)}: 字幕 {chunk_start}-{chunk_end}")
 
-    subtitles = parse_srt(content)
-    print(f"Found {len(subtitles)} subtitles")
+    return translations
 
-    translation_config = config["translation"]
-    mode = translation_config["mode"]
-    print(f"Translation mode: {mode}")
-    print(f"Chunk size: {translation_config['chunk_size']}")
-    print(f"Max workers: {translation_config['max_workers']}")
 
-    print("Starting translation...")
-    start_time = time.time()
-    translated = translate_subtitles(subtitles, config, glossary)
-    elapsed = time.time() - start_time
+def build_output_entries(entries: list[SubtitleEntry], translations: dict[int, str], mode: str) -> list[str]:
+    blocks: list[str] = []
+    for entry in entries:
+        translated = translations[entry.index]
+        if mode == "bilingual":
+            text_lines = entry.text_lines + [f"<i>{translated}</i>"]
+        else:
+            text_lines = translated.splitlines() or [translated]
 
-    print(f"Translation completed in {elapsed:.1f}s")
-    print(f"Writing translated subtitles to {output_file}")
-    output_content = format_srt(translated, mode)
+        block = "\n".join(
+            [
+                str(entry.index),
+                entry.timing,
+                *text_lines,
+            ]
+        )
+        blocks.append(block)
+    return blocks
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write(output_content)
 
-    print(f"Translation completed! Output saved to {output_file}")
+def language_suffix(language: str) -> str:
+    normalized = language.strip().lower()
+    known = {
+        "中文": "cn",
+        "简体中文": "cn",
+        "繁体中文": "tw",
+        "中文（简体）": "cn",
+        "中文（繁體）": "tw",
+        "english": "en",
+        "英语": "en",
+        "日语": "ja",
+        "日本语": "ja",
+        "japanese": "ja",
+        "韩语": "ko",
+        "korean": "ko",
+        "法语": "fr",
+        "french": "fr",
+        "德语": "de",
+        "german": "de",
+        "西班牙语": "es",
+        "spanish": "es",
+    }
+    if normalized in known:
+        return known[normalized]
+
+    ascii_text = (
+        normalized.encode("ascii", errors="ignore").decode("ascii").strip().replace(" ", "_")
+    )
+    ascii_text = re.sub(r"[^a-z0-9_]+", "", ascii_text)
+    return ascii_text or "translated"
+
+
+def resolve_output_path(input_path: Path, output_arg: str | None, target_language: str) -> Path:
+    if output_arg:
+        return Path(output_arg)
+    suffix = language_suffix(target_language)
+    return input_path.with_name(f"{input_path.stem}_{suffix}{input_path.suffix}")
+
+
+def write_srt(path: Path, blocks: list[str]) -> None:
+    path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    args = parse_arguments()
+    input_path = Path(args.input_file)
+    if not input_path.exists():
+        raise SystemExit(f"输入文件不存在: {input_path}")
+
+    config = load_json_file(CONFIG_PATH)
+    glossary = load_json_file(GLOSSARY_PATH) if GLOSSARY_PATH.exists() else {}
+    api_key = resolve_api_key(config)
+
+    subtitle_text = input_path.read_text(encoding="utf-8-sig")
+    entries = parse_srt(subtitle_text)
+    translations = translate_entries(entries, config, glossary, api_key)
+
+    output_path = resolve_output_path(
+        input_path=input_path,
+        output_arg=args.output_file,
+        target_language=config["translation"]["target_language"],
+    )
+    output_blocks = build_output_entries(entries, translations, config["translation"]["mode"])
+    write_srt(output_path, output_blocks)
+
+    print(f"翻译完成，输出文件: {output_path}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
