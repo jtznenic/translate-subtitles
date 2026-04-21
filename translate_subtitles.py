@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import ssl
 import sys
 import threading
 import time
@@ -19,7 +20,7 @@ from typing import Any
 
 CONFIG_PATH = Path("config.json")
 GLOSSARY_PATH = Path("glossary.json")
-REQUEST_TIMEOUT_SECONDS = 120
+REQUEST_TIMEOUT_SECONDS = 300
 MAX_RETRIES = 3
 
 
@@ -264,7 +265,7 @@ def request_translation(
                 attempt += 1
             if attempt < MAX_RETRIES and remaining_entries:
                 time.sleep(min(2 ** max(attempt, 1), 8))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        except (urllib.error.URLError, TimeoutError, ssl.SSLError, json.JSONDecodeError, ValueError) as exc:
             last_error = exc
             attempt += 1
             if attempt < MAX_RETRIES:
@@ -400,6 +401,7 @@ def write_srt(path: Path, blocks: list[str]) -> None:
 
 
 def main() -> int:
+    start_time = time.monotonic()
     args = parse_arguments()
     input_path = Path(args.input_file)
     if not input_path.exists():
@@ -421,7 +423,13 @@ def main() -> int:
     output_blocks = build_output_entries(entries, translations, config["translation"]["mode"])
     write_srt(output_path, output_blocks)
 
+    elapsed_time = time.monotonic() - start_time
+    mins, secs = divmod(elapsed_time, 60)
     print(f"翻译完成，输出文件: {output_path}")
+    if mins > 0:
+        print(f"执行耗时: {int(mins)} 分 {secs:.2f} 秒")
+    else:
+        print(f"执行耗时: {secs:.2f} 秒")
     return 0
 
 

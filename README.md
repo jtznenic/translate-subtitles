@@ -1,25 +1,25 @@
-# AI Subtitle Translation Tool
+# 字幕翻译工具
 
-An AI-powered multilingual subtitle translation tool that translates subtitle files from any language to a target language. Supports bilingual mode and translation-only mode, with custom glossary and batch parallel translation capabilities.
+一个基于AI的多语言字幕翻译工具，支持将任意语言的字幕文件翻译成目标语言。提供双语模式和纯翻译模式，支持自定义词汇表和批量并行翻译。
 
-## Features
+## 功能特点
 
-- Support for SRT format subtitle parsing and translation
-- Automatic source language detection by the model
-- **Bilingual mode**: Original text + translation (translation displayed in italics)
-- **Translation-only mode**: Outputs only the translated content
-- **Custom glossary**: Ensures consistent translation of proper nouns
-- **Concurrent translation**: Supports multi-threaded batch processing for improved efficiency
-- **Automatic chunking**: Splits long subtitle files into chunks to avoid API limits
-- **JSON format output**: Ensures accuracy and parseability of translation results
+- 支持SRT格式字幕文件的解析和翻译
+- 支持模型自动判断源语言并翻译到目标语言
+- 双语模式：原文 + 翻译（翻译部分用斜体显示）
+- 纯翻译模式：仅输出翻译内容
+- 自定义词汇表：确保专有名词翻译的一致性
+- 并发翻译：支持多线程批量处理，提高翻译效率
+- 自动分块：将长字幕文件分块处理，避免超出API限制
+- JSON格式输出：确保翻译结果的准确性和可解析性
 
-## Installation
+## 安装依赖
 
-This project uses [uv](https://github.com/astral-sh/uv) as the package manager.
+本项目使用 [uv](https://github.com/astral-sh/uv) 作为包管理工具。
 
-### Install uv
+### 安装 uv
 
-If you don't have uv installed:
+如果尚未安装 uv：
 
 ```bash
 # Linux/macOS
@@ -29,36 +29,36 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### Install Dependencies
+### 安装项目依赖
 
 ```bash
-# Navigate to project directory
+# 进入项目目录
 cd /home/ubuntu/workspaces/oneself/subtitiles
 
-# Sync dependencies with uv
+# 使用 uv 同步依赖
 uv sync
 ```
 
-### Run the Program
+### 运行程序
 
 ```bash
-# Run script with uv
-uv run python translate_subtitles.py <input_subtitle_file> [output_subtitle_file]
+# 使用 uv 运行脚本
+uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
 ```
 
-**Before running**, configure your API key (choose one of the two methods):
+运行前请先配置API密钥（二选一）：
 
-**Method 1: Environment Variable (Recommended)**
+**方式一：环境变量（推荐）**
 ```bash
 export SUBTITLE_API_KEY="your-api-key"
 ```
 
-**Method 2: Configuration File**
-Fill in the key in the `api.api_key` field of `config.json` (not recommended due to security risks)
+**方式二：配置文件**
+在 `config.json` 的 `api.api_key` 字段中填入密钥（不推荐，存在安全风险）
 
-## Configuration
+## 配置文件说明
 
-### config.json - Main Configuration File
+### config.json - 主配置文件
 
 ```json
 {
@@ -74,146 +74,146 @@ Fill in the key in the `api.api_key` field of `config.json` (not recommended due
     "chunk_size": 15,
     "max_workers": 5,
     "rpm_limit": 60,
-    "target_language": "Chinese"
+    "target_language": "中文"
   },
   "prompts": {
-    "system_prompt": "...",
-    "translation_prompt": "...",
-    "bilingual_prompt": "..."
+    "system_prompt": "你是一位专业的字幕翻译师。请先自行判断原文语言，再将字幕准确翻译成{target_language}，在保持原意的同时让{target_language}表达自然流畅。对于人名、地名等专有名词，请参考提供的词汇表进行翻译。",
+    "translation_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}",
+    "bilingual_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}"
   }
 }
 ```
 
-#### API Configuration (api)
+#### API 配置 (api)
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `api_key` | API key placeholder, recommended to provide via `SUBTITLE_API_KEY` environment variable | Empty string |
-| `api_url` | API endpoint URL | Required |
-| `model_id` | Model name to use | Required |
-| `temperature` | Temperature parameter controlling output randomness (0-1) | 0.3 |
-| `max_tokens` | Maximum tokens per request | 8192 |
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `api_key` | API密钥，占位字段，建议通过环境变量 `SUBTITLE_API_KEY` 提供 | 空字符串 |
+| `api_url` | API接口地址 | 必填 |
+| `model_id` | 使用的模型名称 | 必填 |
+| `temperature` | 温度参数，控制输出的随机性（0-1） | 0.3 |
+| `max_tokens` | 单次请求的最大token数 | 8192 |
 
-#### Translation Configuration (translation)
+#### 翻译配置 (translation)
 
-| Parameter | Description | Options | Default |
-|-----------|-------------|---------|---------|
-| `mode` | Translation mode | `bilingual` / `translation_only` | `translation_only` |
-| `chunk_size` | Number of subtitle entries per translation batch | Positive integer | 15 |
-| `max_workers` | Number of concurrent threads | Positive integer | 5 |
-| `rpm_limit` | Requests Per Minute limit | Positive integer | 60 |
-| `target_language` | Target language | Any language name | Chinese |
+| 参数 | 说明 | 可选值 | 默认值 |
+|------|------|--------|--------|
+| `mode` | 翻译模式 | `bilingual` / `translation_only` | `translation_only` |
+| `chunk_size` | 每次翻译的字幕条目数量 | 正整数 | 15 |
+| `max_workers` | 并发线程数 | 正整数 | 5 |
+| `rpm_limit` | 每分钟请求数限制（Requests Per Minute） | 正整数 | 60 |
+| `target_language` | 目标语言 | 任意语言名称 | 中文 |
 
-#### Prompt Configuration (prompts)
+#### 提示词配置 (prompts)
 
-| Parameter | Description |
-|-----------|-------------|
-| `system_prompt` | System prompt defining the AI's role and task |
-| `translation_prompt` | Prompt for translation-only mode |
-| `bilingual_prompt` | Prompt for bilingual mode |
+| 参数 | 说明 |
+|------|------|
+| `system_prompt` | 系统提示词，定义AI的角色和任务 |
+| `translation_prompt` | 纯翻译模式的提示词 |
+| `bilingual_prompt` | 双语模式的提示词 |
 
-### glossary.json - Glossary File
+### glossary.json - 词汇表文件
 
-Used to define proper nouns that need consistent translation.
+用于定义需要固定翻译的专有名词，确保翻译一致性。
 
 ```json
 {
   "フリーレン": "芙莉莲",
   "フェルン": "菲伦",
-  "シュタルク": "修塔尔ク",
+  "シュタルク": "修塔尔克",
   "ヒンメル": "辛美尔"
 }
 ```
 
-Format: `"original": "translation"`
+格式：`"原文": "译文"`
 
-## Usage
+## 使用方法
 
-### Basic Usage
+### 基本用法
 
 ```bash
-uv run python translate_subtitles.py <input_subtitle_file> [output_subtitle_file]
+uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
 ```
 
-### Examples
+### 示例
 
-1. **Auto-generated output filename** (Recommended)
+1. **使用自动输出文件名**（推荐）
    ```bash
    uv run python translate_subtitles.py subtitles.srt
-   # If target language is "Chinese", output: subtitles_cn.srt
+   # 如果目标语言是"中文"，输出: subtitles_cn.srt
    ```
 
-2. **Specify output filename**
+2. **指定输出文件名**
    ```bash
    uv run python translate_subtitles.py subtitles.srt my_subtitles.srt
    ```
 
-### Output Filename Rules
+### 输出文件名规则
 
-If no output filename is specified, the tool automatically generates one based on the input filename and target language:
-- Output filename = `original_filename_language_code.srt`
-- For example: if target language is "Chinese", the output filename gets `_cn` suffix; if target language is "English", it gets `_en` suffix.
+如果不指定输出文件名，工具会根据输入文件名和目标语言自动生成：
+- 输出文件名 = `原文件名_语言代号.srt`
+- 例如：目标语言为"中文"，输出文件名会加上 `_cn` 后缀；目标语言为"英语"，输出文件名会加上 `_en` 后缀。
 
-## Output Format
+## 输出格式
 
-### Translation-Only Mode (mode: "translation_only")
-
-```
-1
-00:00:00,000 --> 00:00:02,000
-This is the translated content of the first subtitle
-
-2
-00:00:02,500 --> 00:00:04,000
-This is the translated content of the second subtitle
-```
-
-### Bilingual Mode (mode: "bilingual")
+### 纯翻译模式 (mode: "translation_only")
 
 ```
 1
 00:00:00,000 --> 00:00:02,000
-Original content
-<i>This is the translation</i>
+这是第一句字幕的翻译内容
 
 2
 00:00:02,500 --> 00:00:04,000
-Second original content
-<i>Second translation</i>
+这是第二句字幕的翻译内容
 ```
 
-## Performance Tuning
+### 双语模式 (mode: "bilingual")
 
-1. **Adjust chunk_size**
-   - Larger `chunk_size` reduces API calls but may exceed token limits per request
-   - Recommended value: 10-30
+```
+1
+00:00:00,000 --> 00:00:02,000
+原文内容
+<i>这是翻译内容</i>
 
-2. **Adjust max_workers**
-   - Larger `max_workers` increases translation speed but adds API concurrency pressure
-   - Recommended value: 3-10 (depends on API limits)
+2
+00:00:02,500 --> 00:00:04,000
+第二句原文内容
+<i>第二句翻译内容</i>
+```
 
-3. **Adjust temperature**
-   - Lower values (0.1-0.3): More consistent translation, suitable for standard translation scenarios
-   - Higher values (0.5-0.7): More flexible translation but may be less consistent
+## 性能调优建议
 
-## Project Structure
+1. **调整 chunk_size**
+   - 较大的 `chunk_size` 可以减少API调用次数，但可能超出单次请求的token限制
+   - 建议值：10-30
+
+2. **调整 max_workers**
+   - 较大的 `max_workers` 可以提高翻译速度，但会增加API并发压力
+   - 建议值：3-10（取决于API限制）
+
+3. **调整 temperature**
+   - 较低的值（0.1-0.3）：翻译更一致，适合需要标准翻译的场景
+   - 较高的值（0.5-0.7）：翻译更灵活，但可能不够一致
+
+## 文件结构
 
 ```
 .
-├── translate_subtitles.py  # Main program file
-├── config.json             # Configuration file
-├── glossary.json           # Glossary file
-├── README.md               # English documentation (this file)
-└── README_CN.md            # Chinese documentation
+├── translate_subtitles.py  # 主程序文件
+├── config.json             # 配置文件
+├── glossary.json           # 词汇表文件
+├── README.md               # 英文文档
+└── README_CN.md            # 中文文档（本文件）
 ```
 
-## API Key Configuration
+## API密钥配置
 
-This project supports two API key configuration methods:
+本项目支持两种API密钥配置方式：
 
-### Method 1: Environment Variable (Recommended)
+### 方式一：环境变量（推荐）
 
-Set the environment variable before running:
+在运行前设置环境变量：
 
 **Linux/macOS:**
 ```bash
@@ -227,16 +227,16 @@ $env:SUBTITLE_API_KEY="your-api-key"
 uv run python translate_subtitles.py input.srt
 ```
 
-**Permanent configuration (Linux/macOS):**
+**永久配置（Linux/macOS）：**
 ```bash
-# Add to ~/.bashrc or ~/.zshrc
+# 添加到 ~/.bashrc 或 ~/.zshrc
 echo 'export SUBTITLE_API_KEY="your-api-key"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### Method 2: Configuration File
+### 方式二：配置文件
 
-Fill in the key directly in the `api.api_key` field of `config.json`:
+在 `config.json` 的 `api.api_key` 字段中直接填入密钥：
 
 ```json
 {
@@ -247,19 +247,15 @@ Fill in the key directly in the `api.api_key` field of `config.json`:
 }
 ```
 
-> ⚠️ **Security Note**: The configuration file method has security risks as config.json may be accidentally committed to version control. It's recommended to use the environment variable method and add `.env` or any files containing keys to `.gitignore`.
+> ⚠️ **安全提示**：配置文件方式存在安全风险，config.json可能被意外提交到版本控制。建议优先使用环境变量方式，并将 `.env` 文件或包含密钥的文件加入 `.gitignore`。
 
-## Notes
+## 注意事项
 
-1. Ensure `config.json` exists and is configured correctly
-2. It's recommended to provide a valid API key via the `SUBTITLE_API_KEY` environment variable
-3. Translation results depend on AI model quality; important content should be reviewed manually
-4. Glossary can improve proper noun translation consistency; consider preparing a specific glossary for each work
+1. 确保 `config.json` 文件存在且配置正确
+2. 建议优先通过环境变量 `SUBTITLE_API_KEY` 提供有效的 API 密钥
+3. 翻译结果依赖于AI模型的质量，建议人工复核重要内容
+4. 词汇表可以提高专有名词的翻译一致性，建议为作品准备专门的词汇表
 
-## Documentation
-
-- [中文文档 (Chinese Documentation)](README_CN.md)
-
-## License
+## 许可证
 
 MIT License
