@@ -75,7 +75,7 @@ def resolve_api_key(config: dict[str, Any]) -> str:
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="多线程字幕翻译工具")
+    parser = argparse.ArgumentParser(description="translate-subtitles 字幕翻译工具")
     parser.add_argument("input_file", help="输入的 SRT 字幕文件路径")
     parser.add_argument("output_file", nargs="?", help="输出的 SRT 文件路径，可选")
     return parser.parse_args()

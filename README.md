@@ -1,6 +1,6 @@
-# 字幕翻译工具
+# translate-subtitles
 
-一个基于AI的多语言字幕翻译工具，支持将任意语言的字幕文件翻译成目标语言。提供双语模式和纯翻译模式，支持自定义词汇表和批量并行翻译。
+`translate-subtitles` 是一个基于 AI 的多语言字幕翻译工具，支持将任意语言的字幕文件翻译成目标语言。提供双语模式和纯翻译模式，支持自定义词汇表和批量并行翻译。
 
 ## 功能特点
 
@@ -33,7 +33,7 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ```bash
 # 进入项目目录
-cd /home/ubuntu/workspaces/oneself/subtitiles
+cd /home/ubuntu/workspaces/oneself/translate-subtitles
 
 # 使用 uv 同步依赖
 uv sync
