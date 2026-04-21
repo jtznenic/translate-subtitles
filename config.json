@@ -9,7 +9,7 @@
   "translation": {
     "mode": "bilingual",
     "chunk_size": 20,
-    "max_workers": 8,
+    "max_workers": 10,
     "target_language": "中文",
     "rpm_limit": 60
   },
