@@ -1,17 +1,15 @@
 # translate-subtitles
 
-`translate-subtitles` 是一个基于 AI 的多语言字幕翻译工具，支持将任意语言的字幕文件翻译成目标语言。提供双语模式和纯翻译模式，支持自定义词汇表和批量并行翻译。
+`translate-subtitles` 是一个多功能的字幕处理与翻译工具集，包含了基于大语言模型（LLM）的多语言字幕翻译工具，以及本地字幕合并工具。
 
-## 功能特点
+## 工具集概览
 
-- 支持SRT格式字幕文件的解析和翻译
-- 支持模型自动判断源语言并翻译到目标语言
-- 双语模式：原文 + 翻译（翻译部分用斜体显示）
-- 纯翻译模式：仅输出翻译内容
-- 自定义词汇表：确保专有名词翻译的一致性
-- 并发翻译：支持多线程批量处理，提高翻译效率
-- 自动分块：将长字幕文件分块处理，避免超出API限制
-- JSON格式输出：确保翻译结果的准确性和可解析性
+本项目目前提供以下两个主要脚本：
+
+1. **`translate_subtitles.py`**：基于 AI 接口的自动字幕翻译工具。支持分块并发、词汇表、纯翻译/双语模式等。
+2. **`merge_srt.py`**：本地双语字幕合并工具。可将单独的原文和译文字幕文件，合并为带 `<i>` 标签的双语字幕。
+
+---
 
 ## 安装依赖
 
@@ -33,228 +31,150 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ```bash
 # 进入项目目录
-cd /home/ubuntu/workspaces/oneself/translate-subtitles
+cd translate-subtitles
 
 # 使用 uv 同步依赖
 uv sync
 ```
 
+---
+
+## 工具 1：自动字幕翻译 (`translate_subtitles.py`)
+
+支持将任意语言的 SRT 字幕文件翻译成目标语言，支持双语模式、纯翻译模式、自定义词汇表和批量并发请求。
+
 ### 运行程序
 
 ```bash
-# 使用 uv 运行脚本
-uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
+# 基本用法
+uv run translate_subtitles.py <输入字幕文件> [输出字幕文件]
 ```
 
-运行前请先配置API密钥（二选一）：
+运行前请先配置 API 密钥（推荐使用环境变量）：
 
-**方式一：环境变量（推荐）**
 ```bash
+# Linux/macOS
 export SUBTITLE_API_KEY="your-api-key"
+
+# Windows PowerShell
+$env:SUBTITLE_API_KEY="your-api-key"
 ```
 
-**方式二：配置文件**
-在 `config.json` 的 `api.api_key` 字段中填入密钥（不推荐，存在安全风险）
-
-## 配置文件说明
-
-### config.json - 主配置文件
+### 配置文件说明 (`config.json`)
 
 ```json
 {
   "api": {
     "api_key": "",
-    "api_url": "https://api.sensenova.cn/compatible-mode/v2/chat/completions",
-    "model_id": "SenseChat-Turbo-1202",
+    "api_url": "https://api.openai.com/v1/chat/completions",
+    "model_id": "gpt-4.1-mini",
     "temperature": 0.3,
-    "max_tokens": 8192
+    "max_tokens": 4096
   },
   "translation": {
-    "mode": "translation_only",
-    "chunk_size": 15,
-    "max_workers": 5,
+    "mode": "bilingual",
+    "chunk_size": 10,
+    "max_workers": 8,
     "rpm_limit": 60,
-    "target_language": "中文"
+    "target_language": "中文",
+    "source_lang_code": "jp",
+    "target_lang_code": "cn"
   },
-  "prompts": {
-    "system_prompt": "你是一位专业的字幕翻译师。请先自行判断原文语言，再将字幕准确翻译成{target_language}，在保持原意的同时让{target_language}表达自然流畅。对于人名、地名等专有名词，请参考提供的词汇表进行翻译。",
-    "translation_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}",
-    "bilingual_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}"
-  }
+  ...
 }
 ```
 
-#### API 配置 (api)
+#### API 配置
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `api_key` | API密钥，占位字段，建议通过环境变量 `SUBTITLE_API_KEY` 提供 | 空字符串 |
-| `api_url` | API接口地址 | 必填 |
-| `model_id` | 使用的模型名称 | 必填 |
-| `temperature` | 温度参数，控制输出的随机性（0-1） | 0.3 |
-| `max_tokens` | 单次请求的最大token数 | 8192 |
+本项目统一使用 OpenAI Chat Completions 兼容格式，适用于 OpenAI、Azure OpenAI、DeepSeek、Groq、GitHub Models 以及各类兼容 API（包括通过中转服务访问的 Anthropic、Gemini 等）。
 
-#### 翻译配置 (translation)
+- **`api_key`**: API 密钥。推荐优先使用环境变量 `SUBTITLE_API_KEY`。
+- **`api_url`**: API 端点地址，填写完整的 Chat Completions URL（如 `https://api.openai.com/v1/chat/completions`）。
+- **`model_id`**: 调用的模型 ID。
+- **`temperature`**: 生成温度，数值越低越稳定。
+- **`max_tokens`**: 最大输出 token 数。设为 `0` 时按 `ceil(input_tokens × 1.5)` 自动计算；留空或删除则不限制。
 
-| 参数 | 说明 | 可选值 | 默认值 |
-|------|------|--------|--------|
-| `mode` | 翻译模式 | `bilingual` / `translation_only` | `translation_only` |
-| `chunk_size` | 每次翻译的字幕条目数量 | 正整数 | 15 |
-| `max_workers` | 并发线程数 | 正整数 | 5 |
-| `rpm_limit` | 每分钟请求数限制（Requests Per Minute） | 正整数 | 60 |
-| `target_language` | 目标语言 | 任意语言名称 | 中文 |
+#### 配置示例
 
-#### 提示词配置 (prompts)
+```json
+{
+  "api_key": "sk-...",
+  "api_url": "https://api.openai.com/v1/chat/completions",
+  "model_id": "gpt-4.1-mini",
+  "temperature": 0.3,
+  "max_tokens": 4096
+}
+```
 
-| 参数 | 说明 |
-|------|------|
-| `system_prompt` | 系统提示词，定义AI的角色和任务 |
-| `translation_prompt` | 纯翻译模式的提示词 |
-| `bilingual_prompt` | 双语模式的提示词 |
+#### 翻译配置
 
-### glossary.json - 词汇表文件
+- **`mode`**: 翻译模式，支持 `bilingual`（双语：原文 + *译文*）和 `translation_only`（纯翻译）。
+- **`chunk_size`**: 每次请求发送的字幕条目数。
+- **`max_workers`**: 并发请求的线程数。
+- **`rpm_limit`**: 每分钟最大请求数限制。
+- **`source_lang_code` & `target_lang_code`**: 源语言和目标语言代码，用于生成字幕文件名。常用国家代码包括：中文 `cn`，日文 `jp`，英文 `en`，韩文 `ko`。
 
-用于定义需要固定翻译的专有名词，确保翻译一致性。
+### 词汇表文件 (`glossary.json`)
+
+用于定义需要固定翻译的专有名词，确保翻译一致性：
 
 ```json
 {
   "フリーレン": "芙莉莲",
-  "フェルン": "菲伦",
-  "シュタルク": "修塔尔克",
-  "ヒンメル": "辛美尔"
+  "フェルン": "菲伦"
 }
 ```
 
-格式：`"原文": "译文"`
+---
 
-## 使用方法
+## 工具 2：双语字幕合并 (`merge_srt.py`)
 
-### 基本用法
+如果你已经拥有了外文字幕和中文字幕（或任意两种语言的字幕），希望将它们合并为一个双语字幕文件，可以使用该脚本。合并后的字幕默认会在译文处包裹 `<i>` 标签。
+
+### 运行程序
 
 ```bash
-uv run python translate_subtitles.py <输入字幕文件> [输出字幕文件]
+uv run merge_srt.py <原文字幕文件.srt> <翻译字幕文件.srt>
 ```
 
 ### 示例
 
-1. **使用自动输出文件名**（推荐）
-   ```bash
-   uv run python translate_subtitles.py subtitles.srt
-   # 如果目标语言是"中文"，输出: subtitles_cn.srt
-   ```
-
-2. **指定输出文件名**
-   ```bash
-   uv run python translate_subtitles.py subtitles.srt my_subtitles.srt
-   ```
-
-### 输出文件名规则
-
-如果不指定输出文件名，工具会根据输入文件名和目标语言自动生成：
-- 输出文件名 = `原文件名_语言代号.srt`
-- 例如：目标语言为"中文"，输出文件名会加上 `_cn` 后缀；目标语言为"英语"，输出文件名会加上 `_en` 后缀。
-
-## 输出格式
-
-### 纯翻译模式 (mode: "translation_only")
-
-```
-1
-00:00:00,000 --> 00:00:02,000
-这是第一句字幕的翻译内容
-
-2
-00:00:02,500 --> 00:00:04,000
-这是第二句字幕的翻译内容
+```bash
+uv run merge_srt.py S03E11.srt S03E11_chinese.srt
 ```
 
-### 双语模式 (mode: "bilingual")
+**输出：**
+脚本会读取 `config.json` 中的 `source_lang_code` 和 `target_lang_code`，自动生成名为 `S03E11_jp_cn.srt` 的合并文件，内容类似：
 
-```
-1
-00:00:00,000 --> 00:00:02,000
-原文内容
-<i>这是翻译内容</i>
-
-2
-00:00:02,500 --> 00:00:04,000
-第二句原文内容
-<i>第二句翻译内容</i>
+```srt
+3
+00:00:21,438 --> 00:00:24,941
+（綾小路の父）
+生まれながらの天才では意味がない
+<i>（绫小路之父）天生的天才是没有意义的</i>
 ```
 
-## 性能调优建议
+### 合并规则
+1. 以输入的第一个文件（原文字幕）的时间轴和序号为基准。
+2. 查找第二个文件（翻译字幕）中对应序号的文本，将其合并为单行，并添加 `<i>` 标签，附在原文字幕的最下方。
 
-1. **调整 chunk_size**
-   - 较大的 `chunk_size` 可以减少API调用次数，但可能超出单次请求的token限制
-   - 建议值：10-30
-
-2. **调整 max_workers**
-   - 较大的 `max_workers` 可以提高翻译速度，但会增加API并发压力
-   - 建议值：3-10（取决于API限制）
-
-3. **调整 temperature**
-   - 较低的值（0.1-0.3）：翻译更一致，适合需要标准翻译的场景
-   - 较高的值（0.5-0.7）：翻译更灵活，但可能不够一致
+---
 
 ## 文件结构
 
 ```
 .
-├── translate_subtitles.py  # 主程序文件
-├── config.json             # 配置文件
-├── glossary.json           # 词汇表文件
-├── README.md               # 英文文档
-└── README_CN.md            # 中文文档（本文件）
+├── translate_subtitles.py  # 自动字幕翻译脚本
+├── merge_srt.py            # 双语字幕合并脚本
+├── config.json             # 翻译脚本配置文件
+├── glossary.json           # 词汇表（可选）
+└── README.md               # 项目文档
 ```
-
-## API密钥配置
-
-本项目支持两种API密钥配置方式：
-
-### 方式一：环境变量（推荐）
-
-在运行前设置环境变量：
-
-**Linux/macOS:**
-```bash
-export SUBTITLE_API_KEY="your-api-key"
-uv run python translate_subtitles.py input.srt
-```
-
-**Windows PowerShell:**
-```powershell
-$env:SUBTITLE_API_KEY="your-api-key"
-uv run python translate_subtitles.py input.srt
-```
-
-**永久配置（Linux/macOS）：**
-```bash
-# 添加到 ~/.bashrc 或 ~/.zshrc
-echo 'export SUBTITLE_API_KEY="your-api-key"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 方式二：配置文件
-
-在 `config.json` 的 `api.api_key` 字段中直接填入密钥：
-
-```json
-{
-  "api": {
-    "api_key": "your-api-key",
-    ...
-  }
-}
-```
-
-> ⚠️ **安全提示**：配置文件方式存在安全风险，config.json可能被意外提交到版本控制。建议优先使用环境变量方式，并将 `.env` 文件或包含密钥的文件加入 `.gitignore`。
 
 ## 注意事项
 
-1. 确保 `config.json` 文件存在且配置正确
-2. 建议优先通过环境变量 `SUBTITLE_API_KEY` 提供有效的 API 密钥
-3. 翻译结果依赖于AI模型的质量，建议人工复核重要内容
-4. 词汇表可以提高专有名词的翻译一致性，建议为作品准备专门的词汇表
+1. `translate_subtitles.py` 翻译结果依赖于 AI 模型的质量，建议人工复核。
+2. 请不要将带有真实 API Key 的 `config.json` 提交到公开仓库，优先使用环境变量 `SUBTITLE_API_KEY`。
 
 ## 许可证
 
