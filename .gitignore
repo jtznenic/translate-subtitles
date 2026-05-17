@@ -52,3 +52,6 @@ Thumbs.db
 
 # uv lock file (if using uv)
 uv.lock
+
+# Config with sensitive API keys
+config.json

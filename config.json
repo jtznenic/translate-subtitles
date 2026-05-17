@@ -1,21 +1,22 @@
 {
   "api": {
     "api_key": "",
-    "api_url": "https://api.sensenova.cn/compatible-mode/v2/chat/completions",
-    "model_id": "SenseChat-5-1202",
-    "temperature": 0.3,
+    "api_url": "https://token.sensenova.cn/v1/chat/completions",
+    "model_id": "sensenova-6.7-flash-lite",
+    "temperature": 0.2,
     "max_tokens": 4096
   },
   "translation": {
     "mode": "bilingual",
-    "chunk_size": 20,
-    "max_workers": 10,
+    "chunk_size": 50,
+    "max_workers": 5,
     "target_language": "中文",
-    "rpm_limit": 60
+    "source_lang_code": "jp",
+    "target_lang_code": "cn",
+    "rpm_limit": 100
   },
   "prompts": {
-    "system_prompt": "你是一位专业的字幕翻译师。请先自行判断原文语言，再将字幕准确翻译成{target_language}，在保持原意的同时让{target_language}表达自然流畅。对于人名、地名等专有名词，请参考提供的词汇表进行翻译。",
-    "translation_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}",
-    "bilingual_prompt": "请先自行判断以下字幕的原文语言，再将其翻译成{target_language}。要求：\n1. 准确理解原文意思，用自然的{target_language}表达\n2. 保持字幕的简洁性，适合阅读\n3. 对于人名、地名等专有名词，请使用标准译名\n4. 保留原文的语气、情感和语境\n\n以下是固定词汇翻译参考（如果有）：\n{glossary}\n\n请严格按以下JSON格式输出，每个字幕条目为一个对象，包含id（序号）、translated（{target_language}翻译）：\n[\n  {{\"id\": 1, \"translated\": \"{target_language}翻译\"}},\n  {{\"id\": 2, \"translated\": \"{target_language}翻译\"}}\n]\n\n字幕内容：\n{content}"
+    "system_prompt": "你是一位专业的字幕翻译师。\n\n请将字幕准确翻译成{target_language}，在保持原意的同时让表达自然流畅。\n\n严格要求：\n- 必须保持每个id一一对应翻译\n- 不允许合并或拆分字幕\n- 保持语气、情感和语境一致\n- 专有名词必须优先使用提供的词汇表\n\n你只能输出JSON数组，不允许输出任何解释或多余内容。",
+    "user_prompt": "请将以下字幕翻译成{target_language}。\n\n要求：\n1. 表达自然、简洁，适合字幕阅读\n2. 保持原有语气和语境\n3. 专有名词使用标准译名\n4. 每个id必须对应且仅对应一条翻译\n5. 输出数组长度必须与输入完全一致\n6. 保留原有换行结构\n7. 输出必须是合法JSON，只包含id和translated字段\n\n词汇表（如有必须使用）：\n{glossary}\n\n输出格式：\n[\n  {{\"id\": 1, \"translated\": \"...\"}},\n  {{\"id\": 2, \"translated\": \"...\"}}\n]\n\n字幕内容：\n{content}"
   }
 }
